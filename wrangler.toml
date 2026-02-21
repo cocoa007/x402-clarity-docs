@@ -5,3 +5,7 @@ compatibility_date = "2024-09-23"
 [vars]
 NETWORK = "mainnet"
 X402_RELAY_URL = "https://x402relay.com"
+RECIPIENT_ADDRESS = "SP16H0KE0BPR4XNQ64115V5Y1V3XTPGMWG5YPC9TR"
+
+# Secrets (set via `wrangler secret put`):
+# OPENROUTER_API_KEY

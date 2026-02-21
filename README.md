@@ -1,49 +1,29 @@
 # x402-clarity-docs
 
-Pay-per-query Clarity smart contract documentation and analysis service. Payments in sBTC via x402.
+An x402-paid API that provides AI-powered Clarity smart contract analysis. Pay with sBTC to get:
 
-## Endpoints
+- **`POST /api/explain`** — Plain English contract explanation (300 sats sBTC)
+- **`POST /api/functions`** — Document all public/read-only functions (100 sats sBTC)
+- **`POST /api/audit-quick`** — Quick security audit (500 sats sBTC)
+- **`POST /api/diff`** — Compare two contract versions (500 sats sBTC)
 
-| Endpoint | Method | Cost (sBTC) | Description |
-|----------|--------|-------------|-------------|
-| `/api/explain` | POST | 0.000003 (~300 sats) | Plain English contract explanation |
-| `/api/functions` | POST | 0.000001 (~100 sats) | Document all public/read-only functions |
-| `/api/audit-quick` | POST | 0.000005 (~500 sats) | Quick security checklist |
-| `/api/diff` | POST | 0.000005 (~500 sats) | Compare two contract versions |
+## How it works
 
-## Request Format
-
-All endpoints accept:
-```json
-{
-  "contractId": "SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait",
-  "source": "(optional — raw Clarity source if not deployed)"
-}
-```
-
-For `/api/diff`:
-```json
-{
-  "oldContractId": "SP..contract-v1",
-  "newContractId": "SP..contract-v2"
-}
-```
-
-## Payment
-
-All paid endpoints use x402 with **sBTC** on Stacks mainnet. The relay handles payment verification automatically.
+1. Send a request with `contractId` (e.g., `SP000000000000000000002Q6VF78.pox-4`) or raw `source`
+2. Pay the x402 sBTC fee
+3. Get AI-powered Clarity analysis back
 
 ## Deploy
 
 ```bash
+npm install
 # Set secrets
-wrangler secret put RECIPIENT_ADDRESS   # your STX address
-wrangler secret put OPENROUTER_API_KEY  # for LLM calls
-
+wrangler secret put OPENROUTER_API_KEY
 # Deploy
 wrangler deploy
 ```
 
-## Why sBTC?
+## Payment
 
-This service demonstrates x402 payments with sBTC — bitcoin-backed micropayments for API access. Every query pays a few hundred sats, settled on Stacks.
+Payments go to: `SP16H0KE0BPR4XNQ64115V5Y1V3XTPGMWG5YPC9TR`
+Protocol: x402 (sBTC on Stacks mainnet)
