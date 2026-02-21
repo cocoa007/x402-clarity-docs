@@ -4,16 +4,10 @@ compatibility_date = "2024-09-23"
 
 [vars]
 NETWORK = "mainnet"
-X402_RELAY_URL = "https://x402relay.com"
 RECIPIENT_ADDRESS = "bc1qv8dt3v9kx3l7r9mnz2gj9r9n9k63frn6w6zmrt"
 RESULTS_BASE_URL = "https://cocoa007.github.io/clarity-audit"
 
-# Secrets (set via `wrangler secret put`):
-# OPENROUTER_API_KEY
-
-# KV namespace — create with: wrangler kv namespace create AUDIT_KV
-# Then paste the id below
 [[kv_namespaces]]
 binding = "AUDIT_KV"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
-preview_id = "REPLACE_WITH_PREVIEW_KV_NAMESPACE_ID"
+id = "2d554dd968e3480e912f73f8642704cb"
+preview_id = "0939ff1f58e74915a9e510228d840f5e"

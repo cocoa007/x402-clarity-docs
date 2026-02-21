@@ -8,32 +8,36 @@ import { cors } from "hono/cors";
 type Bindings = {
   AUDIT_KV: KVNamespace;
   NETWORK: string;
-  X402_RELAY_URL: string;
   RECIPIENT_ADDRESS: string;
-  OPENROUTER_API_KEY: string;
   RESULTS_BASE_URL: string;
 };
 
-type AuditTier = "quick" | "full";
+type RequestType = "explain" | "functions" | "audit-quick" | "diff" | "audit-full";
 
-interface AuditRequest {
-  tier: AuditTier;
+interface JobRequest {
+  type: RequestType;
+  contractId?: string;
+  source?: string;
+  // For diff
+  oldContractId?: string;
+  newContractId?: string;
+  oldSource?: string;
+  newSource?: string;
+  // For audit-full
   repo?: string;
   contract?: string;
-  source?: string;
+  // Callback
   callback_address?: string;
 }
 
-interface AuditRecord {
-  audit_id: string;
-  tier: AuditTier;
+interface JobRecord {
+  job_id: string;
+  type: RequestType;
   status: "queued" | "in-progress" | "complete" | "failed";
-  repo?: string;
-  contract?: string;
-  source?: string;
-  callback_address?: string;
+  request: JobRequest;
   created_at: string;
   updated_at: string;
+  result?: any;
   results_url?: string;
   error?: string;
 }
@@ -42,12 +46,24 @@ interface AuditRecord {
 // Constants
 // ---------------------------------------------------------------------------
 
-const AUDIT_PRICES: Record<AuditTier, string> = {
-  quick: "200",  // sats
-  full: "1000",
+// Prices in sats
+const PRICES: Record<RequestType, number> = {
+  "explain": 300,
+  "functions": 100,
+  "audit-quick": 500,
+  "diff": 500,
+  "audit-full": 1000,
 };
 
-const AUDIT_PREFIX = "audit:";
+const ESTIMATES: Record<RequestType, string> = {
+  "explain": "2-5 minutes",
+  "functions": "2-5 minutes",
+  "audit-quick": "5-10 minutes",
+  "diff": "2-5 minutes",
+  "audit-full": "10-20 minutes",
+};
+
+const JOB_PREFIX = "job:";
 const QUEUE_KEY = "queue:pending";
 
 // ---------------------------------------------------------------------------
@@ -65,59 +81,20 @@ app.use("/*", cors());
 app.get("/", (c) => {
   return c.json({
     service: "x402-clarity",
-    version: "2.0.0",
+    version: "3.0.0",
     description:
-      "Clarity smart contract documentation, analysis, and security audits. Pay-per-query with sBTC via x402.",
-    endpoints: {
-      docs: [
-        {
-          path: "/api/explain",
-          method: "POST",
-          description: "Explain a Clarity contract in plain English",
-          price: "300 sats",
-        },
-        {
-          path: "/api/functions",
-          method: "POST",
-          description: "List and document all public/read-only functions",
-          price: "100 sats",
-        },
-        {
-          path: "/api/audit-quick",
-          method: "POST",
-          description: "Quick security checklist — common Clarity pitfalls",
-          price: "500 sats",
-        },
-        {
-          path: "/api/diff",
-          method: "POST",
-          description: "Compare two contract versions",
-          price: "500 sats",
-        },
-      ],
-      audits: [
-        {
-          path: "/api/audit-request",
-          method: "POST",
-          description: "Submit a contract for full security audit (queued, async)",
-          tiers: {
-            quick: { price: "200 sats", estimated: "5 minutes" },
-            full: { price: "1000 sats", estimated: "15 minutes" },
-          },
-        },
-        {
-          path: "/api/audit-status/:id",
-          method: "GET",
-          description: "Check audit status",
-          free: true,
-        },
-        {
-          path: "/api/audits",
-          method: "GET",
-          description: "List recent audits",
-          free: true,
-        },
-      ],
+      "Clarity smart contract analysis and security audits. All requests are queued and processed asynchronously. Pay with sBTC via x402.",
+    endpoints: [
+      { path: "/api/request", method: "POST", description: "Submit a job (explain, functions, audit-quick, diff, audit-full)", paymentRequired: true },
+      { path: "/api/status/:id", method: "GET", description: "Check job status and get results", free: true },
+      { path: "/api/jobs", method: "GET", description: "List recent jobs", free: true },
+    ],
+    types: {
+      "explain": { price: "300 sats", description: "Explain a contract in plain English", estimated: "2-5 minutes" },
+      "functions": { price: "100 sats", description: "List and document all public/read-only functions", estimated: "2-5 minutes" },
+      "audit-quick": { price: "500 sats", description: "Quick security checklist", estimated: "5-10 minutes" },
+      "diff": { price: "500 sats", description: "Compare two contract versions", estimated: "2-5 minutes" },
+      "audit-full": { price: "1000 sats", description: "Full security audit with exploit tests", estimated: "10-20 minutes" },
     },
     payment: {
       tokenType: "sBTC",
@@ -132,240 +109,93 @@ app.get("/", (c) => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-async function fetchContractSource(contractId: string): Promise<string | null> {
-  const [addr, name] = contractId.split(".");
-  if (!addr || !name) return null;
-  const url = `https://api.hiro.so/v2/contracts/source/${addr}/${name}`;
-  const res = await fetch(url);
-  if (!res.ok) return null;
-  const data = (await res.json()) as { source: string };
-  return data.source;
-}
-
-async function askLLM(
-  apiKey: string,
-  system: string,
-  user: string
-): Promise<string> {
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "anthropic/claude-sonnet-4-20250514",
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      max_tokens: 4096,
-    }),
-  });
-  if (!res.ok) throw new Error(`LLM error: ${res.status}`);
-  const data = (await res.json()) as any;
-  return data.choices?.[0]?.message?.content ?? "No response";
-}
-
-// ---------------------------------------------------------------------------
-// x402 payment middleware
-// ---------------------------------------------------------------------------
-
-function requirePayment(amount: string) {
-  return async (c: any, next: any) => {
-    const verified = c.req.header("x-payment-verified");
-    if (verified === "true") {
-      await next();
-      return;
-    }
-    c.header("X-Payment-Required", "true");
-    c.header("X-Payment-Amount", amount);
-    c.header("X-Payment-Token", "sBTC");
-    c.header("X-Payment-Network", c.env.NETWORK);
-    c.header("X-Payment-Recipient", c.env.RECIPIENT_ADDRESS);
-    return c.json(
-      {
-        status: 402,
-        message: `Payment required: ${amount} sats sBTC`,
-        payment: {
-          amount,
-          tokenType: "sBTC",
-          recipient: c.env.RECIPIENT_ADDRESS,
-          network: c.env.NETWORK,
-        },
-      },
-      402
-    );
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Docs endpoints
-// ---------------------------------------------------------------------------
-
-app.post("/api/explain", requirePayment("300"), async (c) => {
-  const body = await c.req.json<{ contractId?: string; source?: string }>();
-  const source =
-    body.source ?? (body.contractId ? await fetchContractSource(body.contractId) : null);
-  if (!source) return c.json({ error: "Provide contractId or source" }, 400);
-
-  const result = await askLLM(
-    c.env.OPENROUTER_API_KEY,
-    "You are an expert Clarity smart contract analyst. Explain the contract in plain English. Cover: purpose, state (maps/vars), public functions, authorization model, risks/concerns. Be concise but thorough.",
-    source
-  );
-  return c.json({ explanation: result, contractId: body.contractId });
-});
-
-app.post("/api/functions", requirePayment("100"), async (c) => {
-  const body = await c.req.json<{ contractId?: string; source?: string }>();
-  const source =
-    body.source ?? (body.contractId ? await fetchContractSource(body.contractId) : null);
-  if (!source) return c.json({ error: "Provide contractId or source" }, 400);
-
-  const result = await askLLM(
-    c.env.OPENROUTER_API_KEY,
-    "You are a Clarity documentation generator. For each public and read-only function in this contract, output: name, parameters (with types), return type, and a one-line description. Format as JSON array.",
-    source
-  );
-  return c.json({ functions: result, contractId: body.contractId });
-});
-
-app.post("/api/audit-quick", requirePayment("500"), async (c) => {
-  const body = await c.req.json<{ contractId?: string; source?: string }>();
-  const source =
-    body.source ?? (body.contractId ? await fetchContractSource(body.contractId) : null);
-  if (!source) return c.json({ error: "Provide contractId or source" }, 400);
-
-  const result = await askLLM(
-    c.env.OPENROUTER_API_KEY,
-    `You are a Clarity security auditor. Check this contract for common issues:
-- Unchecked authorization (missing tx-sender checks)
-- Reentrancy-like patterns
-- Integer overflow/underflow
-- Unprotected admin functions
-- Missing post-conditions
-- Unsafe unwrap usage
-- Map/var manipulation without proper guards
-Rate severity (critical/high/medium/low/info). Be specific with line references.`,
-    source
-  );
-  return c.json({ audit: result, contractId: body.contractId });
-});
-
-app.post("/api/diff", requirePayment("500"), async (c) => {
-  const body = await c.req.json<{
-    oldContractId?: string;
-    newContractId?: string;
-    oldSource?: string;
-    newSource?: string;
-  }>();
-  const oldSource =
-    body.oldSource ??
-    (body.oldContractId ? await fetchContractSource(body.oldContractId) : null);
-  const newSource =
-    body.newSource ??
-    (body.newContractId ? await fetchContractSource(body.newContractId) : null);
-  if (!oldSource || !newSource)
-    return c.json({ error: "Provide both old and new contractId or source" }, 400);
-
-  const result = await askLLM(
-    c.env.OPENROUTER_API_KEY,
-    `You are a Clarity contract diff analyst. Compare these two contract versions. Identify:
-- New functions added
-- Functions removed or renamed
-- Changed behavior in existing functions
-- State/map changes
-- Security implications of the changes
-Be specific and concise.`,
-    `=== OLD VERSION ===\n${oldSource}\n\n=== NEW VERSION ===\n${newSource}`
-  );
-  return c.json({
-    diff: result,
-    oldContractId: body.oldContractId,
-    newContractId: body.newContractId,
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Audit queue endpoints (paid)
-// ---------------------------------------------------------------------------
-
-async function addToQueue(kv: KVNamespace, auditId: string): Promise<void> {
+async function addToQueue(kv: KVNamespace, jobId: string): Promise<void> {
   const raw = await kv.get(QUEUE_KEY);
   const queue: string[] = raw ? JSON.parse(raw) : [];
-  queue.push(auditId);
+  queue.push(jobId);
   await kv.put(QUEUE_KEY, JSON.stringify(queue));
 }
 
-app.post("/api/audit-request", async (c) => {
-  const body = await c.req.json<AuditRequest>();
+// ---------------------------------------------------------------------------
+// POST /api/request — submit any job type
+// ---------------------------------------------------------------------------
 
-  const tier = body.tier;
-  if (!tier || !["quick", "full"].includes(tier)) {
-    return c.json({ error: 'Invalid tier. Must be "quick" or "full".' }, 400);
+app.post("/api/request", async (c) => {
+  const body = await c.req.json<JobRequest>();
+
+  // Validate type
+  const type = body.type;
+  if (!type || !Object.keys(PRICES).includes(type)) {
+    return c.json({
+      error: `Invalid type. Must be one of: ${Object.keys(PRICES).join(", ")}`,
+    }, 400);
   }
 
-  if (!body.source && !(body.repo && body.contract)) {
-    return c.json({ error: "Provide either source or repo + contract path." }, 400);
+  // Validate input based on type
+  if (type === "diff") {
+    if (!(body.oldContractId || body.oldSource) || !(body.newContractId || body.newSource)) {
+      return c.json({ error: "Diff requires old and new contractId or source." }, 400);
+    }
+  } else if (type === "audit-full") {
+    if (!body.source && !(body.repo && body.contract)) {
+      return c.json({ error: "Full audit requires source or repo + contract path." }, 400);
+    }
+  } else {
+    if (!body.contractId && !body.source) {
+      return c.json({ error: "Provide contractId or source." }, 400);
+    }
   }
 
-  // x402 payment gate (dynamic price based on tier)
+  // x402 payment gate
   const verified = c.req.header("x-payment-verified");
   if (verified !== "true") {
-    const amount = AUDIT_PRICES[tier];
+    const amount = String(PRICES[type]);
     c.header("X-Payment-Required", "true");
     c.header("X-Payment-Amount", amount);
     c.header("X-Payment-Token", "sBTC");
     c.header("X-Payment-Network", c.env.NETWORK);
     c.header("X-Payment-Recipient", c.env.RECIPIENT_ADDRESS);
-    c.header("X-Payment-Description", `Clarity ${tier} audit — ${amount} sats sBTC`);
-    return c.json(
-      {
-        status: 402,
-        message: `Payment required: ${amount} sats sBTC`,
-        payment: {
-          amount,
-          tokenType: "sBTC",
-          recipient: c.env.RECIPIENT_ADDRESS,
-          network: c.env.NETWORK,
-          description: `Clarity ${tier} audit`,
-        },
+    c.header("X-Payment-Description", `Clarity ${type} — ${amount} sats sBTC`);
+    return c.json({
+      status: 402,
+      message: `Payment required: ${amount} sats sBTC`,
+      payment: {
+        amount,
+        tokenType: "sBTC",
+        recipient: c.env.RECIPIENT_ADDRESS,
+        network: c.env.NETWORK,
+        description: `Clarity ${type}`,
       },
-      402
-    );
+    }, 402);
   }
 
-  // Payment verified — create audit record
-  const auditId = crypto.randomUUID();
+  // Payment verified — create job
+  const jobId = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const record: AuditRecord = {
-    audit_id: auditId,
-    tier,
+  const record: JobRecord = {
+    job_id: jobId,
+    type,
     status: "queued",
-    repo: body.repo,
-    contract: body.contract,
-    source: body.source,
-    callback_address: body.callback_address,
+    request: body,
     created_at: now,
     updated_at: now,
   };
 
   await c.env.AUDIT_KV.put(
-    `${AUDIT_PREFIX}${auditId}`,
+    `${JOB_PREFIX}${jobId}`,
     JSON.stringify(record),
     { expirationTtl: 60 * 60 * 24 * 30 }
   );
 
-  await addToQueue(c.env.AUDIT_KV, auditId);
+  await addToQueue(c.env.AUDIT_KV, jobId);
 
   return c.json({
-    audit_id: auditId,
-    tier,
+    job_id: jobId,
+    type,
     status: "queued",
-    estimated_completion: tier === "quick" ? "5 minutes" : "15 minutes",
-    results_url: `${c.env.RESULTS_BASE_URL}/${auditId}.html`,
+    estimated_completion: ESTIMATES[type],
+    status_url: `/api/status/${jobId}`,
     callback: body.callback_address
       ? "Will notify via inbox when complete"
       : null,
@@ -373,94 +203,95 @@ app.post("/api/audit-request", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// Audit status & listing (free)
+// GET /api/status/:id — check job status + results
 // ---------------------------------------------------------------------------
 
-app.get("/api/audit-status/:id", async (c) => {
+app.get("/api/status/:id", async (c) => {
   const id = c.req.param("id");
-  const raw = await c.env.AUDIT_KV.get(`${AUDIT_PREFIX}${id}`);
-  if (!raw) return c.json({ error: "Audit not found" }, 404);
+  const raw = await c.env.AUDIT_KV.get(`${JOB_PREFIX}${id}`);
+  if (!raw) return c.json({ error: "Job not found" }, 404);
 
-  const record: AuditRecord = JSON.parse(raw);
+  const record: JobRecord = JSON.parse(raw);
   return c.json({
-    audit_id: record.audit_id,
-    tier: record.tier,
+    job_id: record.job_id,
+    type: record.type,
     status: record.status,
     created_at: record.created_at,
     updated_at: record.updated_at,
-    results_url: record.status === "complete"
-      ? `${c.env.RESULTS_BASE_URL}/${record.audit_id}.html`
-      : null,
+    result: record.result || null,
+    results_url: record.results_url || null,
     error: record.error || null,
   });
 });
 
-app.get("/api/audits", async (c) => {
-  const limit = Math.min(parseInt(c.req.query("limit") || "20"), 100);
-  const list = await c.env.AUDIT_KV.list({ prefix: AUDIT_PREFIX, limit });
+// ---------------------------------------------------------------------------
+// GET /api/jobs — list recent jobs
+// ---------------------------------------------------------------------------
 
-  const audits: any[] = [];
+app.get("/api/jobs", async (c) => {
+  const limit = Math.min(parseInt(c.req.query("limit") || "20"), 100);
+  const list = await c.env.AUDIT_KV.list({ prefix: JOB_PREFIX, limit });
+
+  const jobs: any[] = [];
   for (const key of list.keys) {
     const raw = await c.env.AUDIT_KV.get(key.name);
     if (!raw) continue;
-    const record: AuditRecord = JSON.parse(raw);
-    audits.push({
-      audit_id: record.audit_id,
-      tier: record.tier,
+    const record: JobRecord = JSON.parse(raw);
+    jobs.push({
+      job_id: record.job_id,
+      type: record.type,
       status: record.status,
-      repo: record.repo,
-      contract: record.contract,
       created_at: record.created_at,
-      results_url: record.status === "complete"
-        ? `${c.env.RESULTS_BASE_URL}/${record.audit_id}.html`
-        : null,
+      result: record.status === "complete" ? (record.result ? "available" : null) : null,
+      results_url: record.results_url || null,
     });
   }
 
-  audits.sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  );
-
-  return c.json({ audits, count: audits.length });
+  jobs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  return c.json({ jobs, count: jobs.length });
 });
 
 // ---------------------------------------------------------------------------
-// Internal endpoints (agent polls these — protect with auth in production)
+// Internal endpoints (agent polls these)
 // ---------------------------------------------------------------------------
 
+// GET /internal/queue — pending job IDs
 app.get("/internal/queue", async (c) => {
   const raw = await c.env.AUDIT_KV.get(QUEUE_KEY);
   const queue: string[] = raw ? JSON.parse(raw) : [];
   return c.json({ pending: queue });
 });
 
-app.get("/internal/audit/:id", async (c) => {
+// GET /internal/job/:id — full job record including request details
+app.get("/internal/job/:id", async (c) => {
   const id = c.req.param("id");
-  const raw = await c.env.AUDIT_KV.get(`${AUDIT_PREFIX}${id}`);
+  const raw = await c.env.AUDIT_KV.get(`${JOB_PREFIX}${id}`);
   if (!raw) return c.json({ error: "Not found" }, 404);
   return c.json(JSON.parse(raw));
 });
 
-app.post("/internal/audit/:id/status", async (c) => {
+// POST /internal/job/:id/complete — agent posts results
+app.post("/internal/job/:id/complete", async (c) => {
   const id = c.req.param("id");
-  const raw = await c.env.AUDIT_KV.get(`${AUDIT_PREFIX}${id}`);
+  const raw = await c.env.AUDIT_KV.get(`${JOB_PREFIX}${id}`);
   if (!raw) return c.json({ error: "Not found" }, 404);
 
-  const record: AuditRecord = JSON.parse(raw);
+  const record: JobRecord = JSON.parse(raw);
   const update = await c.req.json<{
-    status: AuditRecord["status"];
+    status: "in-progress" | "complete" | "failed";
+    result?: any;
+    results_url?: string;
     error?: string;
   }>();
 
   record.status = update.status;
   record.updated_at = new Date().toISOString();
+  if (update.result) record.result = update.result;
+  if (update.results_url) record.results_url = update.results_url;
   if (update.error) record.error = update.error;
-  if (update.status === "complete") {
-    record.results_url = `${c.env.RESULTS_BASE_URL}/${id}.html`;
-  }
 
   await c.env.AUDIT_KV.put(
-    `${AUDIT_PREFIX}${id}`,
+    `${JOB_PREFIX}${id}`,
     JSON.stringify(record),
     { expirationTtl: 60 * 60 * 24 * 30 }
   );
