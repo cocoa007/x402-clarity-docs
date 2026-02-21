@@ -1,8 +1,8 @@
 {
-  "name": "x402-clarity-docs",
-  "version": "1.0.0",
+  "name": "x402-clarity",
+  "version": "2.0.0",
   "private": true,
-  "description": "x402-paid Clarity smart contract documentation and analysis API",
+  "description": "Clarity smart contract docs, analysis, and paid security audits via x402/sBTC",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",

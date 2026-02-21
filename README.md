@@ -1,29 +1,78 @@
-# x402-clarity-docs
+# x402-clarity
 
-An x402-paid API that provides AI-powered Clarity smart contract analysis. Pay with sBTC to get:
+Clarity smart contract documentation, analysis, and security audits — pay-per-query with sBTC via x402.
 
-- **`POST /api/explain`** — Plain English contract explanation (300 sats sBTC)
-- **`POST /api/functions`** — Document all public/read-only functions (100 sats sBTC)
-- **`POST /api/audit-quick`** — Quick security audit (500 sats sBTC)
-- **`POST /api/diff`** — Compare two contract versions (500 sats sBTC)
+## Endpoints
 
-## How it works
+### Docs (instant, LLM-powered)
+| Endpoint | Price | Description |
+|----------|-------|-------------|
+| `POST /api/explain` | 300 sats | Explain a contract in plain English |
+| `POST /api/functions` | 100 sats | List all public/read-only functions |
+| `POST /api/audit-quick` | 500 sats | Quick security checklist |
+| `POST /api/diff` | 500 sats | Compare two contract versions |
 
-1. Send a request with `contractId` (e.g., `SP000000000000000000002Q6VF78.pox-4`) or raw `source`
-2. Pay the x402 sBTC fee
-3. Get AI-powered Clarity analysis back
+**Input**: `{ "contractId": "SP...<name>" }` or `{ "source": "<clarity code>" }`
+
+### Audits (async, queued for full review)
+| Endpoint | Price | Description |
+|----------|-------|-------------|
+| `POST /api/audit-request` | 200-1000 sats | Submit contract for security audit |
+| `GET /api/audit-status/:id` | free | Check audit status |
+| `GET /api/audits` | free | List recent audits |
+
+**Audit request input**:
+```json
+{
+  "tier": "quick|full",
+  "repo": "https://github.com/owner/repo",
+  "contract": "contracts/my-contract.clar",
+  "callback_address": "bc1q... (optional, for inbox notification)"
+}
+```
+
+- **quick** (200 sats): Automated scan, ~5 min
+- **full** (1000 sats): Thorough manual-grade audit with exploit tests, ~15 min
+
+### Internal (agent use)
+| Endpoint | Description |
+|----------|-------------|
+| `GET /internal/queue` | Poll pending audit IDs |
+| `GET /internal/audit/:id` | Full audit record with source |
+| `POST /internal/audit/:id/status` | Update audit status |
 
 ## Deploy
 
 ```bash
+# Install deps
 npm install
+
+# Create KV namespace
+wrangler kv namespace create AUDIT_KV
+# Copy the id into wrangler.toml
+
 # Set secrets
 wrangler secret put OPENROUTER_API_KEY
+
 # Deploy
 wrangler deploy
 ```
 
-## Payment
+## x402 Flow
 
-Payments go to: `SP16H0KE0BPR4XNQ64115V5Y1V3XTPGMWG5YPC9TR`
-Protocol: x402 (sBTC on Stacks mainnet)
+1. Client sends request without payment → gets 402 with payment headers
+2. Client pays sBTC to recipient address
+3. Client resubmits with `x-payment-verified: true` (via relay)
+4. For docs: instant LLM response
+5. For audits: queued, agent picks up and runs full audit pipeline
+
+## Architecture
+
+```
+Client → x402 payment → Worker → {
+  docs:   instant LLM response
+  audits: KV queue → agent heartbeat polls → sub-agent audit → results published
+}
+```
+
+Audit results publish to [cocoa007.github.io/clarity-audit](https://cocoa007.github.io/clarity-audit).
