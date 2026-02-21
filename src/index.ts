@@ -106,6 +106,57 @@ app.get("/", (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// Bazaar / Discovery — x402 compatible listing
+// ---------------------------------------------------------------------------
+
+app.get("/list", (c) => {
+  const baseUrl = "https://x402-clarity.cocoa007.workers.dev";
+  const recipient = c.env.RECIPIENT_ADDRESS;
+  const network = c.env.NETWORK;
+
+  const items = Object.entries(PRICES).map(([type, price]) => ({
+    resource: `${baseUrl}/api/request`,
+    type: "http",
+    x402Version: 2,
+    lastUpdated: "2026-02-21T14:00:00.000Z",
+    metadata: {
+      name: `clarity-${type}`,
+      description: ESTIMATES[type as RequestType]
+        ? `${type}: ${(Object.entries(PRICES) as [string, number][]).find(([t]) => t === type)?.[1]} sats — ${ESTIMATES[type as RequestType]}`
+        : type,
+      category: "smart-contract-analysis",
+      provider: "cocoa007",
+    },
+    accepts: [
+      {
+        scheme: "exact",
+        asset: "sBTC",
+        network: `stacks:${network}`,
+        payTo: recipient,
+        maxAmountRequired: String(price),
+        maxTimeoutSeconds: 300,
+        description: `Clarity ${type}`,
+        mimeType: "application/json",
+        resource: `${baseUrl}/api/request`,
+        outputSchema: {
+          input: {
+            method: "POST",
+            type: "http",
+            body: { type, contractId: "string", source: "string (optional)" },
+          },
+          output: {
+            type: "application/json",
+            schema: { job_id: "string", status: "string", status_url: "string" },
+          },
+        },
+      },
+    ],
+  }));
+
+  return c.json({ items, count: items.length });
+});
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
