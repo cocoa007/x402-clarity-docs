@@ -97,8 +97,8 @@ app.get("/", (c) => {
       "audit-full": { price: "1000 sats", description: "Full security audit with exploit tests", estimated: "10-20 minutes" },
     },
     payment: {
-      tokenType: "sBTC",
-      network: "mainnet",
+      asset: "stacks:1/sip010:SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token.sbtc-token",
+      network: "stacks:1",
       recipient: "bc1qv8dt3v9kx3l7r9mnz2gj9r9n9k63frn6w6zmrt",
     },
     portfolio: "https://cocoa007.github.io/clarity-audit",
@@ -130,8 +130,8 @@ app.get("/list", (c) => {
     accepts: [
       {
         scheme: "exact",
-        asset: "sBTC",
-        network: `stacks:${network}`,
+        asset: "stacks:1/sip010:SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token.sbtc-token",
+        network: "stacks:1",
         payTo: recipient,
         maxAmountRequired: String(price),
         maxTimeoutSeconds: 300,
@@ -203,8 +203,8 @@ app.post("/api/request", async (c) => {
     const amount = String(PRICES[type]);
     c.header("X-Payment-Required", "true");
     c.header("X-Payment-Amount", amount);
-    c.header("X-Payment-Token", "sBTC");
-    c.header("X-Payment-Network", c.env.NETWORK);
+    c.header("X-Payment-Asset", "stacks:1/sip010:SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token.sbtc-token");
+    c.header("X-Payment-Network", "stacks:1");
     c.header("X-Payment-Recipient", c.env.RECIPIENT_ADDRESS);
     c.header("X-Payment-Description", `Clarity ${type} — ${amount} sats sBTC`);
     return c.json({
@@ -212,9 +212,9 @@ app.post("/api/request", async (c) => {
       message: `Payment required: ${amount} sats sBTC`,
       payment: {
         amount,
-        tokenType: "sBTC",
+        asset: "stacks:1/sip010:SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token.sbtc-token",
+        network: "stacks:1",
         recipient: c.env.RECIPIENT_ADDRESS,
-        network: c.env.NETWORK,
         description: `Clarity ${type}`,
       },
     }, 402);
