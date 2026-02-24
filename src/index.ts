@@ -12,7 +12,7 @@ type Bindings = {
   RESULTS_BASE_URL: string;
 };
 
-type RequestType = "explain" | "functions" | "audit-quick" | "diff" | "audit-full";
+type RequestType = "explain" | "functions" | "audit-quick" | "diff" | "audit-full" | "post-conditions";
 
 interface JobRequest {
   type: RequestType;
@@ -53,6 +53,7 @@ const PRICES: Record<RequestType, number> = {
   "audit-quick": 500,
   "diff": 500,
   "audit-full": 1000,
+  "post-conditions": 500,
 };
 
 const ESTIMATES: Record<RequestType, string> = {
@@ -61,6 +62,7 @@ const ESTIMATES: Record<RequestType, string> = {
   "audit-quick": "5-10 minutes",
   "diff": "2-5 minutes",
   "audit-full": "10-20 minutes",
+  "post-conditions": "5-10 minutes",
 };
 
 const JOB_PREFIX = "job:";
@@ -85,7 +87,7 @@ app.get("/", (c) => {
     description:
       "Clarity smart contract analysis and security audits. All requests are queued and processed asynchronously. Pay with sBTC via x402.",
     endpoints: [
-      { path: "/api/request", method: "POST", description: "Submit a job (explain, functions, audit-quick, diff, audit-full)", paymentRequired: true },
+      { path: "/api/request", method: "POST", description: "Submit a job (explain, functions, audit-quick, diff, audit-full, post-conditions)", paymentRequired: true },
       { path: "/api/status/:id", method: "GET", description: "Check job status and get results", free: true },
       { path: "/api/jobs", method: "GET", description: "List recent jobs", free: true },
     ],
@@ -95,6 +97,7 @@ app.get("/", (c) => {
       "audit-quick": { price: "500 sats", description: "Quick security checklist", estimated: "5-10 minutes" },
       "diff": { price: "500 sats", description: "Compare two contract versions", estimated: "2-5 minutes" },
       "audit-full": { price: "1000 sats", description: "Full security audit with exploit tests", estimated: "10-20 minutes" },
+      "post-conditions": { price: "500 sats", description: "Analyze post-condition coverage for safe transaction calls", estimated: "5-10 minutes" },
     },
     payment: {
       asset: "stacks:1/sip010:SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token.sbtc-token",

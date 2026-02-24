@@ -19,6 +19,7 @@ Clarity smart contract analysis and security audits — pay with sBTC, get resul
 | `audit-quick` | 500 sats | 5-10 min | Quick security checklist |
 | `diff` | 500 sats | 2-5 min | Compare two contract versions |
 | `audit-full` | 1000 sats | 10-20 min | Full security audit with exploit tests |
+| `post-conditions` | 500 sats | 5-10 min | Analyze post-condition coverage for safe calls |
 
 ## Endpoints
 
